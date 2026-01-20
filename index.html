@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hash Transformer (Local Only)</title>
+
+  <!-- No external resources. No storage. No network calls. -->
+  <!-- CSP: restrict everything to this page. (Inline script required for single-file gist.) -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    label { font-size: 14px; }
+    input[type="number"], select { padding: 6px 8px; }
+    textarea, input[type="text"] { width: 100%; box-sizing: border-box; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    textarea { min-height: 120px; }
+    .out { min-height: 44px; }
+    button { padding: 8px 10px; cursor: pointer; }
+    .muted { color: #555; font-size: 12px; line-height: 1.35; }
+    .ok { color: #0a7; }
+    .bad { color: #b00; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-top: 12px; }
+  </style>
+</head>
+
+<body>
+  <h2>Hash Transformer (Local Only)</h2>
+  <div class="muted">
+    Runs entirely in your browser using Web Crypto. No saving. No requests. No analytics.<br>
+    Input is transformed deterministically. Copy the output into your login form.
+  </div>
+
+  <div class="card">
+    <label for="inp"><b>Input</b> (e.g. <code>site|stars|core</code>)</label>
+    <textarea id="inp" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+
+    <div class="row" style="margin-top:10px;">
+      <label>Algorithm:
+        <select id="alg">
+          <option value="SHA-256" selected>SHA-256</option>
+          <option value="SHA-384">SHA-384</option>
+          <option value="SHA-512">SHA-512</option>
+        </select>
+      </label>
+
+      <label>Output format:
+        <select id="fmt">
+          <option value="b64url" selected>Base64URL (no +/=)</option>
+          <option value="hex">Hex</option>
+        </select>
+      </label>
+
+      <label>Length:
+        <input id="len" type="number" min="8" max="128" value="24" />
+      </label>
+
+      <label title="Optional: if you want to include a fixed suffix every time (e.g., ! for high-star accounts).">
+        Suffix:
+        <input id="suffix" type="text" value="" style="width:120px;" spellcheck="false" autocomplete="off" />
+      </label>
+
+      <button id="copy">Copy output</button>
+      <span id="status" class="muted"></span>
+    </div>
+
+    <div style="margin-top:10px;">
+      <label for="out"><b>Output</b></label>
+      <input id="out" class="out" type="text" readonly />
+    </div>
+  </div>
+
+  <script>
+    // No storage used: no localStorage, no cookies, no indexedDB.
+    // No network used: CSP blocks connect-src.
+
+    const $ = (id) => document.getElementById(id);
+
+    function toHex(buf) {
+      const bytes = new Uint8Array(buf);
+      let s = "";
+      for (const b of bytes) s += b.toString(16).padStart(2, "0");
+      return s;
+    }
+
+    function toBase64Url(buf) {
+      const bytes = new Uint8Array(buf);
+      let bin = "";
+      // Chunked to avoid call stack issues on large arrays (hash sizes are small anyway)
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      const b64 = btoa(bin);
+      // base64url: + -> -, / -> _, remove =
+      return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    }
+
+    async function digestString(alg, s) {
+      const data = new TextEncoder().encode(s);
+      const buf = await crypto.subtle.digest(alg, data);
+      return buf;
+    }
+
+    function setStatus(msg, cls) {
+      const st = $("status");
+      st.textContent = msg;
+      st.className = cls ? cls : "muted";
+    }
+
+    async function update() {
+      const inp = $("inp").value;
+      const alg = $("alg").value;
+      const fmt = $("fmt").value;
+      const len = Math.max(0, parseInt($("len").value || "0", 10));
+      const suffix = $("suffix").value || "";
+
+      if (!inp) {
+        $("out").value = "";
+        setStatus("");
+        return;
+      }
+
+      try {
+        const buf = await digestString(alg, inp);
+        const full = (fmt === "hex") ? toHex(buf) : toBase64Url(buf);
+
+        // Deterministic truncation + optional suffix.
+        // If len is 0, output full string.
+        const body = (len > 0) ? full.slice(0, len) : full;
+        $("out").value = body + suffix;
+
+        setStatus("Updated.", "muted ok");
+      } catch (e) {
+        $("out").value = "";
+        setStatus("Error: " + (e && e.message ? e.message : String(e)), "muted bad");
+      }
+    }
+
+    async function copyOut() {
+      const val = $("out").value;
+      if (!val) return;
+
+      try {
+        await navigator.clipboard.writeText(val);
+        setStatus("Copied to clipboard.", "muted ok");
+      } catch {
+        // Fallback for environments where clipboard API is blocked
+        $("out").focus();
+        $("out").select();
+        document.execCommand("copy");
+        setStatus("Copied (fallback).", "muted ok");
+      }
+    }
+
+    // Auto-run transformer on every change (no saving)
+    ["inp","alg","fmt","len","suffix"].forEach(id => {
+      $(id).addEventListener("input", update);
+      $(id).addEventListener("change", update);
+    });
+    $("copy").addEventListener("click", copyOut);
+
+    // Start clean
+    update();
+  </script>
+</body>
+</html>
